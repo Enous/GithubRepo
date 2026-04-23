@@ -19,6 +19,8 @@ import ctypes
 import stat
 import threading
 import queue
+import random
+import tkinter as tk
 from datetime import datetime
 from pathlib import Path
 import traceback
@@ -113,15 +115,22 @@ def groq_analyze(path, api_key):
         with urllib.request.urlopen(req) as resp:
             res_data = json.loads(resp.read().decode("utf-8"))
             return res_data["choices"][0]["message"]["content"]
-    except urllib.error.HTTPError as e:
-        try: body = e.read().decode("utf-8"); error_msg = json.loads(body).get("error", {}).get("message", body)
-        except: error_msg = str(e)
-        return f"Analiz hatası: {error_msg}"
     except Exception as e: return f"Analiz hatası: {str(e)}"
 
 # ──────────────────────────────────────────
 # GUI (CustomTkinter)
 # ──────────────────────────────────────────
+
+# Premium Night Blue Palette
+COLOR_BG     = "#020617"
+COLOR_SIDE   = "#0f172a"
+COLOR_PANEL  = "#1e293b"
+COLOR_ACCENT = "#38bdf8"
+COLOR_TEXT   = "#f8fafc"
+COLOR_BTN    = "#2563eb"
+COLOR_DANGER = "#ef4444"
+COLOR_SUCCESS= "#10b981"
+COLOR_AI     = "#8b5cf6"
 
 try:
     import customtkinter as ctk
@@ -135,72 +144,81 @@ except Exception as e:
     GUI_ERROR = traceback.format_exc()
 
 if GUI_MODE:
+    class SnowBackground(tk.Canvas):
+        def __init__(self, master, **kwargs):
+            super().__init__(master, highlightthickness=0, bg=COLOR_BG, **kwargs)
+            self.flakes = []
+            self.after(100, self.animate)
+
+        def add_flake(self):
+            w = self.winfo_width()
+            if w < 100: w = 1100
+            x = random.randint(0, w)
+            y = -10
+            size = random.randint(1, 3)
+            speed = random.uniform(1.0, 2.5)
+            alpha = random.randint(100, 255)
+            flake = self.create_oval(x, y, x+size, y+size, fill="#ffffff", outline="")
+            self.flakes.append([flake, speed])
+
+        def animate(self):
+            if len(self.flakes) < 80:
+                self.add_flake()
+            for f in self.flakes[:]:
+                self.move(f[0], 0, f[1])
+                pos = self.coords(f[0])
+                if pos and pos[1] > self.winfo_height():
+                    self.delete(f[0])
+                    self.flakes.remove(f)
+            self.after(30, self.animate)
+
     class DetailsDialog(ctk.CTkToplevel):
         def __init__(self, master, repo_data, config, on_repo_changed):
             super().__init__(master)
             self.title("Repo Detayları")
-            self.geometry("600x650")
+            self.geometry("600x680")
+            self.configure(fg_color=COLOR_BG)
             self.data = repo_data
             self.cfg = config
             self.on_repo_changed = on_repo_changed
-            
-            # Make the dialog modal
             self.grab_set()
-            
             self.init_ui()
             self.fetch_stats()
 
         def init_ui(self):
-            # Frame
-            self.main_frame = ctk.CTkFrame(self, corner_radius=15)
+            self.main_frame = ctk.CTkFrame(self, fg_color=COLOR_SIDE, corner_radius=15)
             self.main_frame.pack(fill="both", expand=True, padx=20, pady=20)
             
-            # Title
-            self.lbl_title = ctk.CTkLabel(self.main_frame, text=self.data['name'], font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"), text_color="#38bdf8")
-            self.lbl_title.pack(anchor="w", padx=20, pady=(20, 5))
+            self.lbl_title = ctk.CTkLabel(self.main_frame, text=self.data['name'], font=ctk.CTkFont(family="Segoe UI", size=22, weight="bold"), text_color=COLOR_ACCENT)
+            self.lbl_title.pack(anchor="w", padx=25, pady=(25, 5))
             
-            # Info
             s = format_size(get_folder_size(self.data['path']))
-            self.lbl_info = ctk.CTkLabel(self.main_frame, text=f"📂 Kategori: {self.data['category']}  |  💾 Boyut: {s}", font=ctk.CTkFont(size=13))
-            self.lbl_info.pack(anchor="w", padx=20, pady=(0, 10))
+            self.lbl_info = ctk.CTkLabel(self.main_frame, text=f"📂 Kategori: {self.data['category']}  |  💾 Boyut: {s}", font=ctk.CTkFont(size=14), text_color="#94a3b8")
+            self.lbl_info.pack(anchor="w", padx=25, pady=(0, 15))
             
-            # Stats
-            self.lbl_stats = ctk.CTkLabel(self.main_frame, text="📊 İstatistikler yükleniyor...", font=ctk.CTkFont(size=13, weight="bold"), text_color="#94a3b8", corner_radius=8, fg_color="#1e293b", justify="left")
-            self.lbl_stats.pack(fill="x", padx=20, pady=(0, 10), ipady=10)
+            self.lbl_stats = ctk.CTkLabel(self.main_frame, text="📊 İstatistikler yükleniyor...", font=ctk.CTkFont(size=13, weight="bold"), text_color=COLOR_TEXT, corner_radius=10, fg_color=COLOR_PANEL, justify="left")
+            self.lbl_stats.pack(fill="x", padx=25, pady=(0, 15), ipady=12)
             
-            # Description text box
-            self.txt_desc = ctk.CTkTextbox(self.main_frame, height=150, corner_radius=8)
-            self.txt_desc.pack(fill="both", expand=True, padx=20, pady=(0, 10))
+            self.txt_desc = ctk.CTkTextbox(self.main_frame, height=160, corner_radius=10, fg_color="#0f172a", border_color=COLOR_PANEL, border_width=1)
+            self.txt_desc.pack(fill="both", expand=True, padx=25, pady=(0, 15))
             self.txt_desc.insert("0.0", self.data.get('description') or "Açıklama yok.")
             self.txt_desc.configure(state="disabled")
             
-            # AI Button
             if self.cfg.get("groq_key"):
-                self.btn_ai = ctk.CTkButton(self.main_frame, text="🤖 Yapay Zeka ile Analiz Et (Groq)", fg_color="#8b5cf6", hover_color="#7c3aed", command=self.start_ai_analyze)
-                self.btn_ai.pack(fill="x", padx=20, pady=(0, 10))
+                self.btn_ai = ctk.CTkButton(self.main_frame, text="🤖 Yapay Zeka Analizi", fg_color=COLOR_AI, hover_color="#7c3aed", font=ctk.CTkFont(weight="bold"), command=self.start_ai_analyze)
+                self.btn_ai.pack(fill="x", padx=25, pady=(0, 12))
                 
-            # Buttons row 1
-            btn_frame1 = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-            btn_frame1.pack(fill="x", padx=20, pady=(0, 10))
+            btn_row1 = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+            btn_row1.pack(fill="x", padx=25, pady=(0, 10))
+            ctk.CTkButton(btn_row1, text="Klasörü Aç", fg_color="#334155", command=lambda: os.startfile(self.data['path'])).pack(side="left", expand=True, fill="x", padx=(0, 5))
+            ctk.CTkButton(btn_row1, text="VS Code'da Aç", fg_color=COLOR_SUCCESS, font=ctk.CTkFont(weight="bold"), command=self.open_vscode).pack(side="left", expand=True, fill="x", padx=(5, 0))
             
-            self.btn_open = ctk.CTkButton(btn_frame1, text="Klasörü Aç", command=lambda: os.startfile(self.data['path']))
-            self.btn_open.pack(side="left", expand=True, fill="x", padx=(0, 5))
+            btn_row2 = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+            btn_row2.pack(fill="x", padx=25, pady=(0, 20))
+            ctk.CTkButton(btn_row2, text="Güncelle", fg_color="#f59e0b", command=self.update_repo).pack(side="left", expand=True, fill="x", padx=(0, 5))
+            ctk.CTkButton(btn_row2, text="Sil", fg_color=COLOR_DANGER, command=self.delete_repo).pack(side="left", expand=True, fill="x", padx=(5, 0))
             
-            self.btn_code = ctk.CTkButton(btn_frame1, text="VS Code'da Aç", fg_color="#10b981", hover_color="#059669", command=self.open_vscode)
-            self.btn_code.pack(side="left", expand=True, fill="x", padx=(5, 0))
-            
-            # Buttons row 2
-            btn_frame2 = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-            btn_frame2.pack(fill="x", padx=20, pady=(0, 15))
-            
-            self.btn_up = ctk.CTkButton(btn_frame2, text="Güncelle (Git Pull)", fg_color="#f59e0b", hover_color="#d97706", command=self.update_repo)
-            self.btn_up.pack(side="left", expand=True, fill="x", padx=(0, 5))
-            
-            self.btn_del = ctk.CTkButton(btn_frame2, text="Sil", fg_color="#ef4444", hover_color="#dc2626", command=self.delete_repo)
-            self.btn_del.pack(side="left", expand=True, fill="x", padx=(5, 0))
-            
-            self.btn_close = ctk.CTkButton(self.main_frame, text="Kapat", fg_color="#334155", hover_color="#475569", command=self.destroy)
-            self.btn_close.pack(fill="x", padx=20, pady=(0, 20))
+            ctk.CTkButton(self.main_frame, text="Kapat", fg_color="transparent", border_width=1, border_color=COLOR_PANEL, command=self.destroy).pack(fill="x", padx=25, pady=(0, 25))
 
         def fetch_stats(self):
             def worker():
@@ -208,40 +226,30 @@ if GUI_MODE:
                     owner, repo = self.data['name'].split('/')[-2:]
                     info = fetch_repo_info(owner, repo, self.cfg.get("token"))
                     self.after(0, lambda: self.update_stats(info))
-                except Exception as e:
-                    self.after(0, lambda: self.lbl_stats.configure(text="⚠️ İstatistikler okunamadı."))
+                except: self.after(0, lambda: self.lbl_stats.configure(text="⚠️ İstatistikler okunamadı."))
             threading.Thread(target=worker, daemon=True).start()
 
         def update_stats(self, info):
             if "id" in info:
-                stars = info.get("stargazers_count", 0)
-                forks = info.get("forks_count", 0)
-                watchers = info.get("watchers_count", 0)
-                issues = info.get("open_issues_count", 0)
-                lang = info.get("language", "Bilinmiyor")
+                stars, forks, watchers = info.get("stargazers_count", 0), info.get("forks_count", 0), info.get("watchers_count", 0)
+                issues, lang = info.get("open_issues_count", 0), info.get("language", "Bilinmiyor")
                 lic = info.get("license", {}).get("name", "Yok") if info.get("license") else "Yok"
-                
                 text = (f"⭐ Yıldız: {stars}  |  🍴 Fork: {forks}  |  👀 İzleyen: {watchers}\n"
                         f"🐛 Açık Issue: {issues}  |  💻 Dil: {lang}  |  📜 Lisans: {lic}")
-                self.lbl_stats.configure(text=text, text_color="#e2e8f0")
-            else:
-                self.lbl_stats.configure(text="⚠️ İstatistikler çekilemedi (API Sınırı veya Gizli Repo)")
+                self.lbl_stats.configure(text=text, text_color=COLOR_TEXT)
+            else: self.lbl_stats.configure(text="⚠️ İstatistikler çekilemedi.")
 
         def start_ai_analyze(self):
             self.btn_ai.configure(state="disabled", text="Analiz ediliyor...")
-            self.txt_desc.configure(state="normal")
-            self.txt_desc.delete("0.0", "end")
+            self.txt_desc.configure(state="normal"); self.txt_desc.delete("0.0", "end")
             self.txt_desc.insert("0.0", "Analiz ediliyor, lütfen bekleyin...\n")
             self.txt_desc.configure(state="disabled")
-            
             def worker():
                 res = groq_analyze(self.data['path'], self.cfg['groq_key'])
                 def on_done():
-                    self.txt_desc.configure(state="normal")
-                    self.txt_desc.delete("0.0", "end")
-                    self.txt_desc.insert("0.0", res)
-                    self.txt_desc.configure(state="disabled")
-                    self.btn_ai.configure(state="normal", text="🤖 Yapay Zeka ile Analiz Et (Groq)")
+                    self.txt_desc.configure(state="normal"); self.txt_desc.delete("0.0", "end")
+                    self.txt_desc.insert("0.0", res); self.txt_desc.configure(state="disabled")
+                    self.btn_ai.configure(state="normal", text="🤖 Yapay Zeka Analizi")
                 self.after(0, on_done)
             threading.Thread(target=worker, daemon=True).start()
 
@@ -264,137 +272,137 @@ if GUI_MODE:
                 if rec_file.exists():
                     with open(rec_file, "r", encoding="utf-8") as f: recs = json.load(f)
                     with open(rec_file, "w", encoding="utf-8") as f: json.dump([r for r in recs if r['path']!=self.data['path']], f, indent=2, ensure_ascii=False)
-                self.on_repo_changed()
-                self.destroy()
+                self.on_repo_changed(); self.destroy()
 
     class EnpaiGUI(ctk.CTk):
         def __init__(self):
             super().__init__()
             self.title("EnpaiManage (Enpai Dev)")
-            self.geometry("1100x800")
-            
+            self.geometry("1150x850")
+            self.configure(fg_color=COLOR_BG)
             self.cfg = load_config()
             self.records = []
+            
+            # Animation Background
+            self.snow = SnowBackground(self)
+            self.snow.place(relx=0, rely=0, relwidth=1, relheight=1)
             
             self.init_ui()
             self.load_repos()
             self.after(5000, self.auto_sync)
 
         def init_ui(self):
-            # Configure grid layout
             self.grid_rowconfigure(0, weight=1)
             self.grid_columnconfigure(1, weight=1)
             
             # Sidebar
-            self.sidebar = ctk.CTkFrame(self, corner_radius=0, width=220)
+            self.sidebar = ctk.CTkFrame(self, corner_radius=0, width=240, fg_color=COLOR_SIDE)
             self.sidebar.grid(row=0, column=0, sticky="nsew")
             self.sidebar.grid_propagate(False)
             
-            self.lbl_logo = ctk.CTkLabel(self.sidebar, text="ENPAI DEV", font=ctk.CTkFont(size=24, weight="bold"), text_color="#38bdf8")
-            self.lbl_logo.pack(pady=(30, 40))
+            self.lbl_logo = ctk.CTkLabel(self.sidebar, text="ENPAI DEV", font=ctk.CTkFont(family="Outfit", size=28, weight="bold"), text_color=COLOR_ACCENT)
+            self.lbl_logo.pack(pady=(40, 50))
             
-            self.btn_menu_repos = ctk.CTkButton(self.sidebar, text="📂 Repolar", fg_color="transparent", anchor="w", command=lambda: self.show_page(self.page_repos))
-            self.btn_menu_repos.pack(fill="x", padx=10, pady=5)
+            self.btn_repos = ctk.CTkButton(self.sidebar, text="  📂 Repolar", fg_color="transparent", anchor="w", font=ctk.CTkFont(size=15), height=45, command=lambda: self.show_page(self.page_repos))
+            self.btn_repos.pack(fill="x", padx=15, pady=5)
             
-            self.btn_menu_settings = ctk.CTkButton(self.sidebar, text="⚙️ Ayarlar", fg_color="transparent", anchor="w", command=lambda: self.show_page(self.page_settings))
-            self.btn_menu_settings.pack(fill="x", padx=10, pady=5)
+            self.btn_settings = ctk.CTkButton(self.sidebar, text="  ⚙️ Ayarlar", fg_color="transparent", anchor="w", font=ctk.CTkFont(size=15), height=45, command=lambda: self.show_page(self.page_settings))
+            self.btn_settings.pack(fill="x", padx=15, pady=5)
             
-            # Spacer
             ctk.CTkFrame(self.sidebar, fg_color="transparent").pack(expand=True)
             
-            self.btn_readme = ctk.CTkButton(self.sidebar, text="📝 Profil README", fg_color="#10b981", hover_color="#059669", command=self.gen_readme)
-            self.btn_readme.pack(fill="x", padx=10, pady=(10, 5))
+            self.btn_readme = ctk.CTkButton(self.sidebar, text="📝 Profil README", fg_color=COLOR_SUCCESS, hover_color="#059669", font=ctk.CTkFont(weight="bold"), height=40, command=self.gen_readme)
+            self.btn_readme.pack(fill="x", padx=20, pady=(10, 5))
             
-            self.lbl_author = ctk.CTkLabel(self.sidebar, text="By Enous", font=ctk.CTkFont(size=10), text_color="#64748b")
-            self.lbl_author.pack(pady=(0, 20))
+            self.lbl_author = ctk.CTkLabel(self.sidebar, text="By Enous", font=ctk.CTkFont(size=11), text_color="#4b5563")
+            self.lbl_author.pack(pady=(0, 25))
             
-            # Pages
-            self.page_repos = ctk.CTkFrame(self, fg_color="transparent")
-            self.page_settings = ctk.CTkFrame(self, fg_color="transparent")
+            # Pages Container
+            self.container = ctk.CTkFrame(self, fg_color="transparent")
+            self.container.grid(row=0, column=1, sticky="nsew", padx=30, pady=30)
+            self.container.grid_rowconfigure(0, weight=1)
+            self.container.grid_columnconfigure(0, weight=1)
+            
+            self.page_repos = ctk.CTkFrame(self.container, fg_color="transparent")
+            self.page_settings = ctk.CTkFrame(self.container, fg_color="transparent")
             
             self.setup_repos_page()
             self.setup_settings_page()
-            
             self.show_page(self.page_repos)
 
         def show_page(self, page):
             self.page_repos.grid_forget()
             self.page_settings.grid_forget()
-            page.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
-            
+            page.grid(row=0, column=0, sticky="nsew")
             # Highlight sidebar buttons
             if page == self.page_repos:
-                self.btn_menu_repos.configure(fg_color=["gray75", "gray25"])
-                self.btn_menu_settings.configure(fg_color="transparent")
+                self.btn_repos.configure(fg_color=COLOR_PANEL); self.btn_settings.configure(fg_color="transparent")
             else:
-                self.btn_menu_repos.configure(fg_color="transparent")
-                self.btn_menu_settings.configure(fg_color=["gray75", "gray25"])
+                self.btn_repos.configure(fg_color="transparent"); self.btn_settings.configure(fg_color=COLOR_PANEL)
 
         def setup_repos_page(self):
-            # Cloning section
-            self.lbl_clone = ctk.CTkLabel(self.page_repos, text="GitHub Linkleri", font=ctk.CTkFont(size=14, weight="bold"))
-            self.lbl_clone.pack(anchor="w", pady=(0, 5))
+            # Header section
+            self.url_frame = ctk.CTkFrame(self.page_repos, fg_color=COLOR_SIDE, corner_radius=15, border_width=1, border_color=COLOR_PANEL)
+            self.url_frame.pack(fill="x", pady=(0, 25), padx=5)
             
-            self.url_in = ctk.CTkTextbox(self.page_repos, height=100)
-            self.url_in.pack(fill="x", pady=(0, 10))
+            ctk.CTkLabel(self.url_frame, text="GitHub Linkleri (Satır Satır)", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=20, pady=(15, 5))
+            self.url_in = ctk.CTkTextbox(self.url_frame, height=110, fg_color=COLOR_BG, border_width=0)
+            self.url_in.pack(fill="x", padx=20, pady=(0, 15))
             
-            self.btn_clone = ctk.CTkButton(self.page_repos, text="İndir", command=self.start_clone)
-            self.btn_clone.pack(anchor="e", pady=(0, 5))
+            btn_clone_frame = ctk.CTkFrame(self.url_frame, fg_color="transparent")
+            btn_clone_frame.pack(fill="x", padx=20, pady=(0, 15))
+            self.lbl_status = ctk.CTkLabel(btn_clone_frame, text="Hazır.", text_color="#94a3b8", font=ctk.CTkFont(size=12))
+            self.lbl_status.pack(side="left")
+            self.btn_clone = ctk.CTkButton(btn_clone_frame, text="🚀 İndirmeye Başla", fg_color=COLOR_BTN, font=ctk.CTkFont(weight="bold"), width=160, command=self.start_clone)
+            self.btn_clone.pack(side="right")
             
-            self.lbl_status = ctk.CTkLabel(self.page_repos, text="Hazır.", text_color="#94a3b8")
-            self.lbl_status.pack(anchor="w", pady=(0, 5))
-            
-            self.prog = ctk.CTkProgressBar(self.page_repos, progress_color="#38bdf8")
+            self.prog = ctk.CTkProgressBar(self.page_repos, progress_color=COLOR_ACCENT, height=10)
             self.prog.set(0)
             
-            # Collection section
-            self.lbl_coll = ctk.CTkLabel(self.page_repos, text="Repo Koleksiyonu", font=ctk.CTkFont(size=18, weight="bold"))
-            self.lbl_coll.pack(anchor="w", pady=(20, 10))
-            
-            search_frame = ctk.CTkFrame(self.page_repos, fg_color="transparent")
-            search_frame.pack(fill="x", pady=(0, 10))
-            
-            self.ent_search = ctk.CTkEntry(search_frame, placeholder_text="İsme göre ara...")
-            self.ent_search.pack(side="left", fill="x", expand=True, padx=(0, 10))
-            self.ent_search.bind("<KeyRelease>", lambda e: self.filter_list())
+            # List section
+            self.list_header = ctk.CTkFrame(self.page_repos, fg_color="transparent")
+            self.list_header.pack(fill="x", pady=(15, 10))
+            ctk.CTkLabel(self.list_header, text="Repo Koleksiyonu", font=ctk.CTkFont(size=20, weight="bold")).pack(side="left")
             
             self.cat_var = ctk.StringVar(value="Tümü")
-            self.cb_cat = ctk.CTkOptionMenu(search_frame, variable=self.cat_var, values=["Tümü", "AI-ML", "Security", "Web", "Tools", "Python", "Other"], command=lambda e: self.filter_list())
-            self.cb_cat.pack(side="left")
+            self.cb_cat = ctk.CTkOptionMenu(self.list_header, variable=self.cat_var, values=["Tümü", "AI-ML", "Security", "Web", "Tools", "Python", "Other"], fg_color=COLOR_PANEL, button_color=COLOR_PANEL, command=lambda e: self.filter_list())
+            self.cb_cat.pack(side="right")
             
-            self.scroll_list = ctk.CTkScrollableFrame(self.page_repos, fg_color="#1e293b", corner_radius=10)
-            self.scroll_list.pack(fill="both", expand=True, pady=(0, 5))
+            self.ent_search = ctk.CTkEntry(self.page_repos, placeholder_text="İsim ile filtrele...", height=45, fg_color=COLOR_SIDE, border_color=COLOR_PANEL)
+            self.ent_search.pack(fill="x", pady=(0, 15))
+            self.ent_search.bind("<KeyRelease>", lambda e: self.filter_list())
             
-            self.lbl_path = ctk.CTkLabel(self.page_repos, text="", text_color="#64748b", font=ctk.CTkFont(size=11))
-            self.lbl_path.pack(anchor="w")
+            self.scroll_list = ctk.CTkScrollableFrame(self.page_repos, fg_color=COLOR_SIDE, corner_radius=15, border_width=1, border_color=COLOR_PANEL)
+            self.scroll_list.pack(fill="both", expand=True)
+            
+            self.lbl_path = ctk.CTkLabel(self.page_repos, text="", text_color="#4b5563", font=ctk.CTkFont(size=11))
+            self.lbl_path.pack(anchor="w", pady=(10, 0))
 
         def setup_settings_page(self):
-            frame = ctk.CTkFrame(self.page_settings, corner_radius=10)
-            frame.pack(fill="both", expand=True, padx=40, pady=40)
+            frame = ctk.CTkFrame(self.page_settings, fg_color=COLOR_SIDE, corner_radius=20, border_width=1, border_color=COLOR_PANEL)
+            frame.pack(fill="both", expand=True, padx=20, pady=20)
             
-            ctk.CTkLabel(frame, text="Ayarlar", font=ctk.CTkFont(size=20, weight="bold")).pack(anchor="w", padx=30, pady=(30, 20))
+            ctk.CTkLabel(frame, text="⚙️ Uygulama Ayarları", font=ctk.CTkFont(size=22, weight="bold")).pack(anchor="w", padx=40, pady=(40, 30))
             
-            ctk.CTkLabel(frame, text="GitHub Token", font=ctk.CTkFont(size=13)).pack(anchor="w", padx=30, pady=(0, 5))
-            self.t_ed = ctk.CTkEntry(frame, show="*")
-            self.t_ed.insert(0, self.cfg.get("token", ""))
-            self.t_ed.pack(fill="x", padx=30, pady=(0, 15))
+            self.t_ed = self.create_setting_field(frame, "GitHub Token (Özel repolar için)", self.cfg.get("token", ""), is_pass=True)
+            self.g_ed = self.create_setting_field(frame, "Groq AI API Key", self.cfg.get("groq_key", ""), is_pass=True)
             
-            ctk.CTkLabel(frame, text="Groq API Key", font=ctk.CTkFont(size=13)).pack(anchor="w", padx=30, pady=(0, 5))
-            self.g_ed = ctk.CTkEntry(frame, show="*")
-            self.g_ed.insert(0, self.cfg.get("groq_key", ""))
-            self.g_ed.pack(fill="x", padx=30, pady=(0, 15))
-            
-            ctk.CTkLabel(frame, text="Klonlama Klasörü", font=ctk.CTkFont(size=13)).pack(anchor="w", padx=30, pady=(0, 5))
+            ctk.CTkLabel(frame, text="Klonlama Ana Klasörü", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=40, pady=(0, 5))
             dir_frame = ctk.CTkFrame(frame, fg_color="transparent")
-            dir_frame.pack(fill="x", padx=30, pady=(0, 30))
-            
-            self.d_ed = ctk.CTkEntry(dir_frame)
+            dir_frame.pack(fill="x", padx=40, pady=(0, 30))
+            self.d_ed = ctk.CTkEntry(dir_frame, height=45, fg_color=COLOR_BG, border_color=COLOR_PANEL)
             self.d_ed.insert(0, self.cfg.get("repos_dir", ""))
             self.d_ed.pack(side="left", fill="x", expand=True, padx=(0, 10))
+            ctk.CTkButton(dir_frame, text="Klasör Seç", fg_color=COLOR_PANEL, width=110, height=45, command=self.browse).pack(side="left")
             
-            ctk.CTkButton(dir_frame, text="Seç", fg_color="#334155", hover_color="#475569", width=80, command=self.browse).pack(side="left")
-            
-            ctk.CTkButton(frame, text="Ayarları Kaydet", command=self.save_sets).pack(anchor="e", padx=30, pady=(0, 30))
+            ctk.CTkButton(frame, text="💾 Değişiklikleri Kaydet", fg_color=COLOR_BTN, font=ctk.CTkFont(weight="bold"), height=50, width=200, command=self.save_sets).pack(anchor="e", padx=40, pady=(10, 40))
+
+        def create_setting_field(self, parent, label, value, is_pass=False):
+            ctk.CTkLabel(parent, text=label, font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=40, pady=(0, 5))
+            ent = ctk.CTkEntry(parent, height=45, fg_color=COLOR_BG, border_color=COLOR_PANEL, show="*" if is_pass else "")
+            ent.insert(0, value)
+            ent.pack(fill="x", padx=40, pady=(0, 20))
+            return ent
 
         def gen_readme(self):
             if not self.records: return
@@ -415,17 +423,11 @@ if GUI_MODE:
 
         def browse(self):
             p = filedialog.askdirectory(initialdir=self.d_ed.get())
-            if p:
-                self.d_ed.delete(0, "end")
-                self.d_ed.insert(0, p)
+            if p: self.d_ed.delete(0, "end"); self.d_ed.insert(0, p)
 
         def save_sets(self):
-            self.cfg["token"] = self.t_ed.get().strip()
-            self.cfg["repos_dir"] = self.d_ed.get()
-            self.cfg["groq_key"] = self.g_ed.get().strip()
-            save_config(self.cfg)
-            self.show_page(self.page_repos)
-            self.load_repos()
+            self.cfg["token"], self.cfg["repos_dir"], self.cfg["groq_key"] = self.t_ed.get().strip(), self.d_ed.get(), self.g_ed.get().strip()
+            save_config(self.cfg); self.show_page(self.page_repos); self.load_repos()
 
         def load_repos(self):
             r_dir = Path(self.cfg.get("repos_dir", str(Path.home() / "EnpaiRepos")))
@@ -433,12 +435,10 @@ if GUI_MODE:
             if (r_dir / "repos.json").exists():
                 with open(r_dir / "repos.json", "r", encoding="utf-8") as f: self.records = json.load(f)
             else: self.records = []
-            self.sync_with_fs(refresh=False)
-            self.filter_list()
+            self.sync_with_fs(refresh=False); self.filter_list()
 
         def auto_sync(self):
-            self.sync_with_fs()
-            self.after(5000, self.auto_sync)
+            self.sync_with_fs(); self.after(5000, self.auto_sync)
 
         def sync_with_fs(self, refresh=True):
             if not self.records: return
@@ -450,46 +450,25 @@ if GUI_MODE:
                 if refresh: self.filter_list()
 
         def filter_list(self):
-            # Clear current items
-            for widget in self.scroll_list.winfo_children():
-                widget.destroy()
-                
-            search = self.ent_search.get().lower()
-            cat = self.cat_var.get()
-            
+            for widget in self.scroll_list.winfo_children(): widget.destroy()
+            search, cat = self.ent_search.get().lower(), self.cat_var.get()
             for r in reversed(self.records):
-                if (search in r['name'].lower()) and (cat == "Tümü" or r['category'] == cat):
-                    self.create_repo_item(r)
+                if (search in r['name'].lower()) and (cat == "Tümü" or r['category'] == cat): self.create_repo_item(r)
 
         def create_repo_item(self, repo_data):
-            btn = ctk.CTkButton(
-                self.scroll_list, 
-                text=f"📦 {repo_data['name']}   |   📂 {repo_data['category']}   |   📅 {repo_data['date']}",
-                fg_color="#0f172a",
-                hover_color="#38bdf8",
-                text_color="#f8fafc",
-                anchor="w",
-                height=40,
-                command=lambda r=repo_data: self.show_details(r)
-            )
-            btn.pack(fill="x", pady=2, padx=5)
-
-        def show_details(self, repo_data):
-            DetailsDialog(self, repo_data, self.cfg, self.load_repos)
+            btn = ctk.CTkButton(self.scroll_list, text=f"  📦 {repo_data['name']}    |    📂 {repo_data['category']}    |    📅 {repo_data['date']}", 
+                                fg_color=COLOR_BG, hover_color=COLOR_ACCENT, text_color=COLOR_TEXT, anchor="w", height=50, corner_radius=10, 
+                                font=ctk.CTkFont(size=13), command=lambda r=repo_data: DetailsDialog(self, r, self.cfg, self.load_repos))
+            btn.pack(fill="x", pady=4, padx=8)
 
         def start_clone(self):
             urls = [u for u in self.url_in.get("0.0", "end").split('\n') if u.strip()]
             if not urls: return
-            
-            self.prog.pack(fill="x", pady=(5, 0))
-            self.prog.set(0)
-            
+            self.prog.pack(fill="x", pady=(5, 15)); self.prog.set(0)
             q = queue.Queue()
             def worker():
-                total = len(urls); success = 0
-                base_dir = Path(self.cfg.get("repos_dir", str(Path.home() / "EnpaiRepos")))
-                token = self.cfg.get("token")
-                
+                total, success = len(urls), 0
+                base_dir, token = Path(self.cfg.get("repos_dir", str(Path.home() / "EnpaiRepos"))), self.cfg.get("token")
                 for i, url in enumerate(urls):
                     url = url.strip()
                     if not url: continue
@@ -500,8 +479,7 @@ if GUI_MODE:
                         owner, repo_name = match.groups(); repo_name = repo_name.replace(".git", "")
                         info = fetch_repo_info(owner, repo_name, token); cat = detect_category(info); target = base_dir / cat / repo_name
                         if target.exists(): continue
-                        target.mkdir(parents=True, exist_ok=True)
-                        c_url = info.get("clone_url", url)
+                        target.mkdir(parents=True, exist_ok=True); c_url = info.get("clone_url", url)
                         if token: c_url = c_url.replace("https://", f"https://{token.strip()}@")
                         if subprocess.run(["git", "clone", "--depth", "1", c_url, str(target)], capture_output=True, text=True).returncode == 0:
                             success += 1; d = info.get('description') or "Açıklama yok."
@@ -512,26 +490,17 @@ if GUI_MODE:
                             recs.append({"name": info.get("full_name"), "category": cat, "path": str(target), "description": d, "date": datetime.now().strftime("%Y-%m-%d %H:%M")})
                             with open(rec_file, "w", encoding="utf-8") as f: json.dump(recs, f, indent=2, ensure_ascii=False)
                     except: pass
-                q.put(("done", f"{success} repo indirildi.", 1.0))
-                
+                q.put(("done", f"✨ İşlem tamamlandı! {success} repo indirildi.", 1.0))
             def check_queue():
                 try:
                     while True:
                         msg = q.get_nowait()
-                        if msg[0] == "prog":
-                            self.lbl_status.configure(text=msg[1])
-                            self.prog.set(msg[2])
+                        if msg[0] == "prog": self.lbl_status.configure(text=msg[1]); self.prog.set(msg[2])
                         elif msg[0] == "done":
-                            self.lbl_status.configure(text=msg[1])
-                            self.prog.pack_forget()
-                            self.load_repos()
-                            self.url_in.delete("0.0", "end")
-                            return
+                            self.lbl_status.configure(text=msg[1], text_color=COLOR_SUCCESS); self.prog.pack_forget(); self.load_repos(); self.url_in.delete("0.0", "end"); return
                 except queue.Empty: pass
                 self.after(100, check_queue)
-                
-            threading.Thread(target=worker, daemon=True).start()
-            check_queue()
+            threading.Thread(target=worker, daemon=True).start(); check_queue()
 
 def is_admin():
     try: return ctypes.windll.shell32.IsUserAnAdmin()
@@ -541,20 +510,10 @@ def main():
     if not is_admin():
         script_path = os.path.abspath(sys.argv[0])
         work_dir = os.path.dirname(script_path)
-        ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{script_path}"', work_dir, 1)
-        sys.exit()
-        
+        ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{script_path}"', work_dir, 1); sys.exit()
     if GUI_MODE:
-        app = EnpaiGUI()
-        app.mainloop()
+        app = EnpaiGUI(); app.mainloop()
     else:
-        print("\n[!] HATA: Arayuz baslatilamadi.")
-        print("[!] CustomTkinter kutuphanesi eksik veya hatalı kurulmus olabilir.")
-        print("-" * 50)
-        print("HATA DETAYI:")
-        print(GUI_ERROR)
-        print("-" * 50)
-        print("[!] Cozum: 'kurulum.bat' dosyasini yonetici olarak calistirin.\n")
-        input("Cikmak icin ENTER'a basin...")
+        print("\n[!] HATA: Arayuz baslatilamadi.\n"); input("Cikmak icin ENTER'a basin...")
 
 if __name__ == "__main__": main()
