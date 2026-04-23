@@ -14,7 +14,7 @@ if %errorlevel% neq 0 (
 )
 
 echo [*] CustomTkinter yukleniyor...
-pip install customtkinter
+python -m pip install customtkinter
 
 echo [*] Git kontrol ediliyor...
 git --version >nul 2>&1
