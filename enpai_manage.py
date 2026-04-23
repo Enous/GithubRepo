@@ -217,7 +217,25 @@ if GUI_MODE:
             ctk.CTkButton(btn_row2, text="Güncelle", fg_color="#f59e0b", command=self.update_repo).pack(side="left", expand=True, fill="x", padx=(0, 5))
             ctk.CTkButton(btn_row2, text="Sil", fg_color=COLOR_DANGER, command=self.delete_repo).pack(side="left", expand=True, fill="x", padx=(5, 0))
             
+            dep_py = Path(self.data['path']) / "requirements.txt"
+            dep_js = Path(self.data['path']) / "package.json"
+            if dep_py.exists() or dep_js.exists():
+                cmd = "python -m pip install -r requirements.txt" if dep_py.exists() else "npm install"
+                self.btn_dep = ctk.CTkButton(self.main_frame, text=f"🛠️ Bağımlılıkları Kur ({'Python' if dep_py.exists() else 'Node'})", fg_color=COLOR_BTN, command=lambda c=cmd: self.install_deps(c))
+                self.btn_dep.pack(fill="x", padx=25, pady=(0, 15))
+            
             ctk.CTkButton(self.main_frame, text="Kapat", fg_color="transparent", border_width=1, border_color=COLOR_PANEL, command=self.destroy).pack(fill="x", padx=25, pady=(0, 25))
+
+        def install_deps(self, cmd):
+            self.btn_dep.configure(state="disabled", text="Kuruluyor...")
+            def worker():
+                try:
+                    res = subprocess.run(cmd, cwd=self.data['path'], shell=True, capture_output=True, text=True)
+                    if res.returncode == 0: self.after(0, lambda: messagebox.showinfo("Bilgi", "Kurulum Başarılı!"))
+                    else: self.after(0, lambda: messagebox.showerror("Hata", f"Hata:\n{res.stderr}"))
+                except Exception as e: self.after(0, lambda: messagebox.showerror("Hata", str(e)))
+                finally: self.after(0, lambda: self.btn_dep.configure(state="normal", text=f"🛠️ Bağımlılıkları Kur"))
+            threading.Thread(target=worker, daemon=True).start()
 
         def fetch_stats(self):
             def worker():
@@ -305,6 +323,9 @@ if GUI_MODE:
             self.btn_repos = ctk.CTkButton(self.sidebar, text="  📂 Repolar", fg_color="transparent", anchor="w", font=ctk.CTkFont(size=15), height=45, command=lambda: self.show_page(self.page_repos))
             self.btn_repos.pack(fill="x", padx=15, pady=5)
             
+            self.btn_trend = ctk.CTkButton(self.sidebar, text="  🔥 Trend Keşfet", fg_color="transparent", anchor="w", font=ctk.CTkFont(size=15), height=45, command=lambda: self.show_page(self.page_trending))
+            self.btn_trend.pack(fill="x", padx=15, pady=5)
+            
             self.btn_settings = ctk.CTkButton(self.sidebar, text="  ⚙️ Ayarlar", fg_color="transparent", anchor="w", font=ctk.CTkFont(size=15), height=45, command=lambda: self.show_page(self.page_settings))
             self.btn_settings.pack(fill="x", padx=15, pady=5)
             
@@ -323,21 +344,22 @@ if GUI_MODE:
             self.container.grid_columnconfigure(0, weight=1)
             
             self.page_repos = ctk.CTkFrame(self.container, fg_color="transparent")
+            self.page_trending = ctk.CTkFrame(self.container, fg_color="transparent")
             self.page_settings = ctk.CTkFrame(self.container, fg_color="transparent")
             
             self.setup_repos_page()
+            self.setup_trending_page()
             self.setup_settings_page()
             self.show_page(self.page_repos)
 
         def show_page(self, page):
             self.page_repos.grid_forget()
+            self.page_trending.grid_forget()
             self.page_settings.grid_forget()
             page.grid(row=0, column=0, sticky="nsew")
-            # Highlight sidebar buttons
-            if page == self.page_repos:
-                self.btn_repos.configure(fg_color=COLOR_PANEL); self.btn_settings.configure(fg_color="transparent")
-            else:
-                self.btn_repos.configure(fg_color="transparent"); self.btn_settings.configure(fg_color=COLOR_PANEL)
+            self.btn_repos.configure(fg_color=COLOR_PANEL if page==self.page_repos else "transparent")
+            self.btn_trend.configure(fg_color=COLOR_PANEL if page==self.page_trending else "transparent")
+            self.btn_settings.configure(fg_color=COLOR_PANEL if page==self.page_settings else "transparent")
 
         def setup_repos_page(self):
             # Header section
@@ -376,6 +398,57 @@ if GUI_MODE:
             
             self.lbl_path = ctk.CTkLabel(self.page_repos, text="", text_color="#4b5563", font=ctk.CTkFont(size=11))
             self.lbl_path.pack(anchor="w", pady=(10, 0))
+
+        def setup_trending_page(self):
+            frame = ctk.CTkFrame(self.page_trending, fg_color=COLOR_SIDE, corner_radius=20, border_width=1, border_color=COLOR_PANEL)
+            frame.pack(fill="both", expand=True, padx=20, pady=20)
+            header = ctk.CTkFrame(frame, fg_color="transparent")
+            header.pack(fill="x", padx=40, pady=(40, 20))
+            ctk.CTkLabel(header, text="🔥 GitHub Trendleri", font=ctk.CTkFont(size=22, weight="bold")).pack(side="left")
+            self.btn_refresh_t = ctk.CTkButton(header, text="Yenile", width=100, fg_color=COLOR_PANEL, command=self.load_trends)
+            self.btn_refresh_t.pack(side="right")
+            self.list_t = ctk.CTkScrollableFrame(frame, fg_color=COLOR_BG, corner_radius=15)
+            self.list_t.pack(fill="both", expand=True, padx=40, pady=(0, 40))
+            self.load_trends()
+
+        def load_trends(self):
+            for w in self.list_t.winfo_children(): w.destroy()
+            ctk.CTkLabel(self.list_t, text="Yükleniyor... Lütfen bekleyin.", text_color="#94a3b8").pack(pady=50)
+            self.btn_refresh_t.configure(state="disabled")
+            def worker():
+                try:
+                    import datetime as dt
+                    d = (dt.datetime.now() - dt.timedelta(days=7)).strftime("%Y-%m-%d")
+                    url = f"https://api.github.com/search/repositories?q=created:>{d}&sort=stars&order=desc"
+                    req = urllib.request.Request(url, headers={"User-Agent": "EnpaiManage"})
+                    with urllib.request.urlopen(req) as resp:
+                        data = json.loads(resp.read().decode())
+                        self.after(0, lambda: self.disp_trends(data.get("items", [])[:20]))
+                except Exception as e: self.after(0, lambda: self.disp_trends_err(str(e)))
+            threading.Thread(target=worker, daemon=True).start()
+
+        def disp_trends_err(self, e):
+            for w in self.list_t.winfo_children(): w.destroy()
+            ctk.CTkLabel(self.list_t, text=f"Hata: {e}", text_color=COLOR_DANGER).pack(pady=50)
+            self.btn_refresh_t.configure(state="normal")
+
+        def disp_trends(self, items):
+            for w in self.list_t.winfo_children(): w.destroy()
+            if not items: ctk.CTkLabel(self.list_t, text="Trend bulunamadı.", text_color="#94a3b8").pack(pady=50)
+            for item in items:
+                f = ctk.CTkFrame(self.list_t, fg_color=COLOR_PANEL, corner_radius=10)
+                f.pack(fill="x", pady=5, padx=10, ipady=5)
+                lbl = ctk.CTkLabel(f, text=f"🔥 {item['full_name']} (⭐ {item.get('stargazers_count')} | 💻 {item.get('language') or '?'})", font=ctk.CTkFont(size=14, weight="bold"), text_color=COLOR_TEXT)
+                lbl.pack(side="left", padx=15)
+                btn = ctk.CTkButton(f, text="İndir", width=80, fg_color=COLOR_BTN, command=lambda u=item['html_url']: self.clone_trend(u))
+                btn.pack(side="right", padx=15)
+            self.btn_refresh_t.configure(state="normal")
+
+        def clone_trend(self, url):
+            self.show_page(self.page_repos)
+            self.url_in.delete("0.0", "end")
+            self.url_in.insert("0.0", url)
+            self.start_clone()
 
         def setup_settings_page(self):
             frame = ctk.CTkFrame(self.page_settings, fg_color=COLOR_SIDE, corner_radius=20, border_width=1, border_color=COLOR_PANEL)
