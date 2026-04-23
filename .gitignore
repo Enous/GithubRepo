@@ -1,0 +1,31 @@
+# EnpaiManage Git Ignore
+
+# Local Repository Storage (if kept in project root)
+repos/
+repos.json
+
+# User Configuration (stored in ~/.config, but for safety)
+config.json
+.config/
+
+# Python environment
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# IDEs and Tools
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
