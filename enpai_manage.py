@@ -50,9 +50,8 @@ def save_config(cfg):
 # HELPERS & AI LOGIC
 # ──────────────────────────────────────────
 
-def fetch_repo_info(owner, repo, token=None):
+def fetch_repo_info(owner, repo):
     headers = {"Accept": "application/vnd.github.v3+json", "User-Agent": "EnpaiManage"}
-    if token and token.strip(): headers["Authorization"] = f"token {token.strip()}"
     try:
         req = urllib.request.Request(f"https://api.github.com/repos/{owner}/{repo}", headers=headers)
         with urllib.request.urlopen(req) as resp: return json.loads(resp.read().decode())
@@ -224,7 +223,7 @@ if GUI_MODE:
             def worker():
                 try:
                     owner, repo = self.data['name'].split('/')[-2:]
-                    info = fetch_repo_info(owner, repo, self.cfg.get("token"))
+                    info = fetch_repo_info(owner, repo)
                     self.after(0, lambda: self.update_stats(info))
                 except: self.after(0, lambda: self.lbl_stats.configure(text="⚠️ İstatistikler okunamadı."))
             threading.Thread(target=worker, daemon=True).start()
@@ -384,7 +383,6 @@ if GUI_MODE:
             
             ctk.CTkLabel(frame, text="⚙️ Uygulama Ayarları", font=ctk.CTkFont(size=22, weight="bold")).pack(anchor="w", padx=40, pady=(40, 30))
             
-            self.t_ed = self.create_setting_field(frame, "GitHub Token (Özel repolar için)", self.cfg.get("token", ""), is_pass=True)
             self.g_ed = self.create_setting_field(frame, "Groq AI API Key", self.cfg.get("groq_key", ""), is_pass=True)
             
             ctk.CTkLabel(frame, text="Klonlama Ana Klasörü", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=40, pady=(0, 5))
@@ -426,7 +424,7 @@ if GUI_MODE:
             if p: self.d_ed.delete(0, "end"); self.d_ed.insert(0, p)
 
         def save_sets(self):
-            self.cfg["token"], self.cfg["repos_dir"], self.cfg["groq_key"] = self.t_ed.get().strip(), self.d_ed.get(), self.g_ed.get().strip()
+            self.cfg["repos_dir"], self.cfg["groq_key"] = self.d_ed.get(), self.g_ed.get().strip()
             save_config(self.cfg); self.show_page(self.page_repos); self.load_repos()
 
         def load_repos(self):
@@ -468,7 +466,7 @@ if GUI_MODE:
             q = queue.Queue()
             def worker():
                 total, success = len(urls), 0
-                base_dir, token = Path(self.cfg.get("repos_dir", str(Path.home() / "EnpaiRepos"))), self.cfg.get("token")
+                base_dir = Path(self.cfg.get("repos_dir", str(Path.home() / "EnpaiRepos")))
                 for i, url in enumerate(urls):
                     url = url.strip()
                     if not url: continue
@@ -477,10 +475,9 @@ if GUI_MODE:
                         match = re.search(r"github\.com[:/]([^/]+)/([^/\.]+)", url)
                         if not match: continue
                         owner, repo_name = match.groups(); repo_name = repo_name.replace(".git", "")
-                        info = fetch_repo_info(owner, repo_name, token); cat = detect_category(info); target = base_dir / cat / repo_name
+                        info = fetch_repo_info(owner, repo_name); cat = detect_category(info); target = base_dir / cat / repo_name
                         if target.exists(): continue
                         target.mkdir(parents=True, exist_ok=True); c_url = info.get("clone_url", url)
-                        if token: c_url = c_url.replace("https://", f"https://{token.strip()}@")
                         if subprocess.run(["git", "clone", "--depth", "1", c_url, str(target)], capture_output=True, text=True).returncode == 0:
                             success += 1; d = info.get('description') or "Açıklama yok."
                             with open(target / "info.txt", "w", encoding="utf-8") as f: f.write(f"Repo: {info.get('full_name')}\n{d}\n")
