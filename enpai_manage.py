@@ -514,6 +514,13 @@ def main():
     if GUI_MODE:
         app = EnpaiGUI(); app.mainloop()
     else:
-        print("\n[!] HATA: Arayuz baslatilamadi.\n"); input("Cikmak icin ENTER'a basin...")
+        print("\n[!] HATA: Arayuz baslatilamadi.")
+        print("[!] Kutuphaneler eksik veya Python surumunuz (ornegin Python 3.14) desteklenmiyor olabilir.")
+        print("-" * 50)
+        print("HATA DETAYI:")
+        print(GUI_ERROR)
+        print("-" * 50)
+        print("[!] Lutfen 'kurulum.bat' dosyasini yonetici olarak calistirin.\n")
+        input("Cikmak icin ENTER'a basin...")
 
 if __name__ == "__main__": main()
