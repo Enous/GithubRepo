@@ -152,6 +152,15 @@ try:
     QProgressBar::chunk { background-color: #38bdf8; border-radius: 4px; }
     """
 
+    class StatsWorker(QThread):
+        stats_ready = pyqtSignal(dict)
+        def __init__(self, owner, repo, token):
+            super().__init__()
+            self.owner, self.repo, self.token = owner, repo, token
+        def run(self):
+            info = fetch_repo_info(self.owner, self.repo, self.token)
+            self.stats_ready.emit(info)
+
     class DetailsDialog(QDialog):
         repoChanged = pyqtSignal()
         def __init__(self, repo_data, config, parent=None):
@@ -162,7 +171,23 @@ try:
             header = QLabel(self.data['name']); header.setStyleSheet("font-size: 20px; font-weight: bold; color: #38bdf8;"); layout.addWidget(header)
             s = format_size(get_folder_size(self.data['path']))
             layout.addWidget(QLabel(f"📂 Kategori: {self.data['category']}  |  💾 Boyut: {s}"))
+            
+            self.stats_lbl = QLabel("📊 İstatistikler yükleniyor...")
+            self.stats_lbl.setStyleSheet("color: #94a3b8; font-size: 13px; font-weight: bold; background-color: #1e293b; padding: 10px; border-radius: 8px;")
+            self.stats_lbl.setWordWrap(True)
+            layout.addWidget(self.stats_lbl)
+            
             self.desc = QTextEdit(); self.desc.setReadOnly(True); self.desc.setText(self.data.get('description') or "Açıklama yok."); layout.addWidget(self.desc)
+            
+            # Fetch stats
+            try:
+                owner, repo = self.data['name'].split('/')[-2:]
+                self.stats_worker = StatsWorker(owner, repo, self.cfg.get("token"))
+                self.stats_worker.stats_ready.connect(self.update_stats)
+                self.stats_worker.start()
+            except Exception as e:
+                self.stats_lbl.setText("⚠️ Depo bilgisi okunamadı.")
+
             if self.cfg.get("groq_key"):
                 self.btn_ai = QPushButton("🤖 Yapay Zeka ile Analiz Et (Groq)"); self.btn_ai.setObjectName("AI"); self.btn_ai.clicked.connect(self.start_ai_analyze); layout.addWidget(self.btn_ai)
             row1 = QHBoxLayout()
@@ -172,6 +197,23 @@ try:
             b_up = QPushButton("Güncelle (Git Pull)"); b_up.clicked.connect(self.update_repo); row2.addWidget(b_up)
             b_del = QPushButton("Sil"); b_del.setObjectName("Danger"); b_del.clicked.connect(self.delete_repo); row2.addWidget(b_del); layout.addLayout(row2)
             b_c = QPushButton("Kapat"); b_c.setObjectName("Secondary"); b_c.clicked.connect(self.close); layout.addWidget(b_c)
+            
+        def update_stats(self, info):
+            if "id" in info:
+                stars = info.get("stargazers_count", 0)
+                forks = info.get("forks_count", 0)
+                watchers = info.get("watchers_count", 0)
+                issues = info.get("open_issues_count", 0)
+                lang = info.get("language", "Bilinmiyor")
+                lic = info.get("license", {}).get("name", "Yok") if info.get("license") else "Yok"
+                
+                text = (f"⭐ Yıldız: {stars}  |  🍴 Fork: {forks}  |  👀 İzleyen: {watchers}\n"
+                        f"🐛 Açık Issue: {issues}  |  💻 Dil: {lang}  |  📜 Lisans: {lic}")
+                self.stats_lbl.setText(text)
+                self.stats_lbl.setStyleSheet("color: #e2e8f0; font-size: 13px; font-weight: bold; background-color: #0f172a; border: 1px solid #334155; padding: 10px; border-radius: 8px;")
+            else:
+                self.stats_lbl.setText("⚠️ İstatistikler çekilemedi (API Sınırı veya Gizli Repo)")
+                
         def start_ai_analyze(self):
             self.desc.setText("Analiz ediliyor..."); self.btn_ai.setEnabled(False); QApplication.processEvents()
             self.desc.setText(groq_analyze(self.data['path'], self.cfg['groq_key'])); self.btn_ai.setEnabled(True)
