@@ -362,7 +362,11 @@ try:
         def on_done(self, s, m): self.prog.setVisible(False); self.status.setText(m); self.load_repos(); self.url_in.clear()
 
     GUI_MODE = True
-except: GUI_MODE = False
+    GUI_ERROR = ""
+except Exception as e:
+    import traceback
+    GUI_MODE = False
+    GUI_ERROR = traceback.format_exc()
 
 def is_admin():
     try: return ctypes.windll.shell32.IsUserAnAdmin()
@@ -380,7 +384,12 @@ def main():
     else:
         print("\n[!] HATA: Arayuz baslatilamadi.")
         print("[!] PyQt6 kutuphanesi eksik veya hatalı kurulmus olabilir.")
-        print("[!] Lutfen 'kurulum.bat' dosyasini yonetici olarak calistirin.\n")
+        print("-" * 50)
+        print("HATA DETAYI:")
+        print(GUI_ERROR)
+        print("-" * 50)
+        print("[!] Olası Neden: Python 3.14 gibi deneysel bir surum kullaniyorsaniz PyQt6 desteklenmiyor olabilir.")
+        print("[!] Cozum: Python 3.11 veya 3.12 surumunu kurmayi deneyin.\n")
         input("Cikmak icin ENTER'a basin...")
 
 if __name__ == "__main__": main()
