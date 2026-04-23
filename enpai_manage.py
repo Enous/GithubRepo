@@ -370,8 +370,17 @@ def is_admin():
 
 def main():
     if not is_admin():
-        ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1); sys.exit()
+        script_path = os.path.abspath(sys.argv[0])
+        work_dir = os.path.dirname(script_path)
+        ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{script_path}"', work_dir, 1)
+        sys.exit()
+        
     if GUI_MODE:
         app = QApplication(sys.argv); win = EnpaiGUI(); win.show(); sys.exit(app.exec())
+    else:
+        print("\n[!] HATA: Arayuz baslatilamadi.")
+        print("[!] PyQt6 kutuphanesi eksik veya hatalı kurulmus olabilir.")
+        print("[!] Lutfen 'kurulum.bat' dosyasini yonetici olarak calistirin.\n")
+        input("Cikmak icin ENTER'a basin...")
 
 if __name__ == "__main__": main()
