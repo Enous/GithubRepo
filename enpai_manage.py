@@ -17,8 +17,11 @@ import urllib.error
 import shutil
 import ctypes
 import stat
+import threading
+import queue
 from datetime import datetime
 from pathlib import Path
+import traceback
 
 # Windows UTF-8
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ('utf-8', 'utf8'):
@@ -89,7 +92,6 @@ def format_size(size):
     return f"{size:.2f} TB"
 
 def groq_analyze(path, api_key):
-    """Analyze repo content using Groq AI."""
     try:
         files_summary = []
         important_files = ["README.md", "main.py", "app.py", "index.js", "package.json", "requirements.txt", "enpai_manage.py"]
@@ -118,86 +120,98 @@ def groq_analyze(path, api_key):
     except Exception as e: return f"Analiz hatası: {str(e)}"
 
 # ──────────────────────────────────────────
-# GUI (PyQt6)
+# GUI (CustomTkinter)
 # ──────────────────────────────────────────
 
 try:
-    from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                                 QLineEdit, QPushButton, QLabel, QListWidget, QListWidgetItem, 
-                                 QFileDialog, QStackedWidget, QProgressBar, QDialog, QTextEdit, 
-                                 QMessageBox, QPlainTextEdit, QComboBox)
-    from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-    from PyQt6.QtGui import QColor, QFont
+    import customtkinter as ctk
+    from tkinter import messagebox, filedialog
+    ctk.set_appearance_mode("dark")
+    ctk.set_default_color_theme("blue")
+    GUI_MODE = True
+    GUI_ERROR = ""
+except Exception as e:
+    GUI_MODE = False
+    GUI_ERROR = traceback.format_exc()
 
-    STYLE = """
-    QMainWindow { background-color: #020617; }
-    QWidget#Sidebar { background-color: #0f172a; border-right: 1px solid #1e293b; }
-    QLabel { color: #f8fafc; font-family: 'Segoe UI'; }
-    QLineEdit, QPlainTextEdit, QTextEdit, QComboBox { 
-        background-color: #1e293b; border: 1px solid #334155; border-radius: 8px; 
-        color: white; padding: 10px; font-size: 13px;
-    }
-    QComboBox QAbstractItemView { background-color: #1e293b; color: white; selection-background-color: #38bdf8; }
-    QLineEdit:focus, QPlainTextEdit:focus { border: 1px solid #38bdf8; }
-    QPushButton { background-color: #0ea5e9; color: white; border-radius: 8px; padding: 10px; font-weight: bold; }
-    QPushButton:hover { background-color: #0284c7; }
-    QPushButton#Danger { background-color: #ef4444; }
-    QPushButton#Secondary { background-color: #334155; }
-    QPushButton#Action { background-color: #10b981; }
-    QPushButton#AI { background-color: #8b5cf6; }
-    
-    QListWidget { background-color: #0f172a; border: 1px solid #1e293b; border-radius: 12px; }
-    QListWidget::item { background-color: #1e293b; border-radius: 10px; padding: 15px; margin: 5px; }
-    QProgressBar { border: 1px solid #334155; border-radius: 6px; text-align: center; color: white; font-weight: bold; }
-    QProgressBar::chunk { background-color: #38bdf8; border-radius: 4px; }
-    """
+if GUI_MODE:
+    class DetailsDialog(ctk.CTkToplevel):
+        def __init__(self, master, repo_data, config, on_repo_changed):
+            super().__init__(master)
+            self.title("Repo Detayları")
+            self.geometry("600x650")
+            self.data = repo_data
+            self.cfg = config
+            self.on_repo_changed = on_repo_changed
+            
+            # Make the dialog modal
+            self.grab_set()
+            
+            self.init_ui()
+            self.fetch_stats()
 
-    class StatsWorker(QThread):
-        stats_ready = pyqtSignal(dict)
-        def __init__(self, owner, repo, token):
-            super().__init__()
-            self.owner, self.repo, self.token = owner, repo, token
-        def run(self):
-            info = fetch_repo_info(self.owner, self.repo, self.token)
-            self.stats_ready.emit(info)
-
-    class DetailsDialog(QDialog):
-        repoChanged = pyqtSignal()
-        def __init__(self, repo_data, config, parent=None):
-            super().__init__(parent); self.setWindowTitle("Repo Detayları"); self.setFixedSize(550, 700); self.setStyleSheet(STYLE)
-            self.data, self.cfg = repo_data, config; self.init_ui()
         def init_ui(self):
-            layout = QVBoxLayout(self)
-            header = QLabel(self.data['name']); header.setStyleSheet("font-size: 20px; font-weight: bold; color: #38bdf8;"); layout.addWidget(header)
+            # Frame
+            self.main_frame = ctk.CTkFrame(self, corner_radius=15)
+            self.main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+            
+            # Title
+            self.lbl_title = ctk.CTkLabel(self.main_frame, text=self.data['name'], font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"), text_color="#38bdf8")
+            self.lbl_title.pack(anchor="w", padx=20, pady=(20, 5))
+            
+            # Info
             s = format_size(get_folder_size(self.data['path']))
-            layout.addWidget(QLabel(f"📂 Kategori: {self.data['category']}  |  💾 Boyut: {s}"))
+            self.lbl_info = ctk.CTkLabel(self.main_frame, text=f"📂 Kategori: {self.data['category']}  |  💾 Boyut: {s}", font=ctk.CTkFont(size=13))
+            self.lbl_info.pack(anchor="w", padx=20, pady=(0, 10))
             
-            self.stats_lbl = QLabel("📊 İstatistikler yükleniyor...")
-            self.stats_lbl.setStyleSheet("color: #94a3b8; font-size: 13px; font-weight: bold; background-color: #1e293b; padding: 10px; border-radius: 8px;")
-            self.stats_lbl.setWordWrap(True)
-            layout.addWidget(self.stats_lbl)
+            # Stats
+            self.lbl_stats = ctk.CTkLabel(self.main_frame, text="📊 İstatistikler yükleniyor...", font=ctk.CTkFont(size=13, weight="bold"), text_color="#94a3b8", corner_radius=8, fg_color="#1e293b", justify="left")
+            self.lbl_stats.pack(fill="x", padx=20, pady=(0, 10), ipady=10)
             
-            self.desc = QTextEdit(); self.desc.setReadOnly(True); self.desc.setText(self.data.get('description') or "Açıklama yok."); layout.addWidget(self.desc)
+            # Description text box
+            self.txt_desc = ctk.CTkTextbox(self.main_frame, height=150, corner_radius=8)
+            self.txt_desc.pack(fill="both", expand=True, padx=20, pady=(0, 10))
+            self.txt_desc.insert("0.0", self.data.get('description') or "Açıklama yok.")
+            self.txt_desc.configure(state="disabled")
             
-            # Fetch stats
-            try:
-                owner, repo = self.data['name'].split('/')[-2:]
-                self.stats_worker = StatsWorker(owner, repo, self.cfg.get("token"))
-                self.stats_worker.stats_ready.connect(self.update_stats)
-                self.stats_worker.start()
-            except Exception as e:
-                self.stats_lbl.setText("⚠️ Depo bilgisi okunamadı.")
-
+            # AI Button
             if self.cfg.get("groq_key"):
-                self.btn_ai = QPushButton("🤖 Yapay Zeka ile Analiz Et (Groq)"); self.btn_ai.setObjectName("AI"); self.btn_ai.clicked.connect(self.start_ai_analyze); layout.addWidget(self.btn_ai)
-            row1 = QHBoxLayout()
-            b_open = QPushButton("Klasörü Aç"); b_open.clicked.connect(lambda: os.startfile(self.data['path'])); row1.addWidget(b_open)
-            b_code = QPushButton("VS Code'da Aç"); b_code.setObjectName("Action"); b_code.clicked.connect(self.open_vscode); row1.addWidget(b_code); layout.addLayout(row1)
-            row2 = QHBoxLayout()
-            b_up = QPushButton("Güncelle (Git Pull)"); b_up.clicked.connect(self.update_repo); row2.addWidget(b_up)
-            b_del = QPushButton("Sil"); b_del.setObjectName("Danger"); b_del.clicked.connect(self.delete_repo); row2.addWidget(b_del); layout.addLayout(row2)
-            b_c = QPushButton("Kapat"); b_c.setObjectName("Secondary"); b_c.clicked.connect(self.close); layout.addWidget(b_c)
+                self.btn_ai = ctk.CTkButton(self.main_frame, text="🤖 Yapay Zeka ile Analiz Et (Groq)", fg_color="#8b5cf6", hover_color="#7c3aed", command=self.start_ai_analyze)
+                self.btn_ai.pack(fill="x", padx=20, pady=(0, 10))
+                
+            # Buttons row 1
+            btn_frame1 = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+            btn_frame1.pack(fill="x", padx=20, pady=(0, 10))
             
+            self.btn_open = ctk.CTkButton(btn_frame1, text="Klasörü Aç", command=lambda: os.startfile(self.data['path']))
+            self.btn_open.pack(side="left", expand=True, fill="x", padx=(0, 5))
+            
+            self.btn_code = ctk.CTkButton(btn_frame1, text="VS Code'da Aç", fg_color="#10b981", hover_color="#059669", command=self.open_vscode)
+            self.btn_code.pack(side="left", expand=True, fill="x", padx=(5, 0))
+            
+            # Buttons row 2
+            btn_frame2 = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+            btn_frame2.pack(fill="x", padx=20, pady=(0, 15))
+            
+            self.btn_up = ctk.CTkButton(btn_frame2, text="Güncelle (Git Pull)", fg_color="#f59e0b", hover_color="#d97706", command=self.update_repo)
+            self.btn_up.pack(side="left", expand=True, fill="x", padx=(0, 5))
+            
+            self.btn_del = ctk.CTkButton(btn_frame2, text="Sil", fg_color="#ef4444", hover_color="#dc2626", command=self.delete_repo)
+            self.btn_del.pack(side="left", expand=True, fill="x", padx=(5, 0))
+            
+            self.btn_close = ctk.CTkButton(self.main_frame, text="Kapat", fg_color="#334155", hover_color="#475569", command=self.destroy)
+            self.btn_close.pack(fill="x", padx=20, pady=(0, 20))
+
+        def fetch_stats(self):
+            def worker():
+                try:
+                    owner, repo = self.data['name'].split('/')[-2:]
+                    info = fetch_repo_info(owner, repo, self.cfg.get("token"))
+                    self.after(0, lambda: self.update_stats(info))
+                except Exception as e:
+                    self.after(0, lambda: self.lbl_stats.configure(text="⚠️ İstatistikler okunamadı."))
+            threading.Thread(target=worker, daemon=True).start()
+
         def update_stats(self, info):
             if "id" in info:
                 stars = info.get("stargazers_count", 0)
@@ -209,98 +223,178 @@ try:
                 
                 text = (f"⭐ Yıldız: {stars}  |  🍴 Fork: {forks}  |  👀 İzleyen: {watchers}\n"
                         f"🐛 Açık Issue: {issues}  |  💻 Dil: {lang}  |  📜 Lisans: {lic}")
-                self.stats_lbl.setText(text)
-                self.stats_lbl.setStyleSheet("color: #e2e8f0; font-size: 13px; font-weight: bold; background-color: #0f172a; border: 1px solid #334155; padding: 10px; border-radius: 8px;")
+                self.lbl_stats.configure(text=text, text_color="#e2e8f0")
             else:
-                self.stats_lbl.setText("⚠️ İstatistikler çekilemedi (API Sınırı veya Gizli Repo)")
-                
+                self.lbl_stats.configure(text="⚠️ İstatistikler çekilemedi (API Sınırı veya Gizli Repo)")
+
         def start_ai_analyze(self):
-            self.desc.setText("Analiz ediliyor..."); self.btn_ai.setEnabled(False); QApplication.processEvents()
-            self.desc.setText(groq_analyze(self.data['path'], self.cfg['groq_key'])); self.btn_ai.setEnabled(True)
+            self.btn_ai.configure(state="disabled", text="Analiz ediliyor...")
+            self.txt_desc.configure(state="normal")
+            self.txt_desc.delete("0.0", "end")
+            self.txt_desc.insert("0.0", "Analiz ediliyor, lütfen bekleyin...\n")
+            self.txt_desc.configure(state="disabled")
+            
+            def worker():
+                res = groq_analyze(self.data['path'], self.cfg['groq_key'])
+                def on_done():
+                    self.txt_desc.configure(state="normal")
+                    self.txt_desc.delete("0.0", "end")
+                    self.txt_desc.insert("0.0", res)
+                    self.txt_desc.configure(state="disabled")
+                    self.btn_ai.configure(state="normal", text="🤖 Yapay Zeka ile Analiz Et (Groq)")
+                self.after(0, on_done)
+            threading.Thread(target=worker, daemon=True).start()
+
         def open_vscode(self):
             try: subprocess.Popen(["code", self.data['path']], shell=True)
-            except: QMessageBox.warning(self, "Hata", "VS Code bulunamadı.")
+            except: messagebox.showwarning("Hata", "VS Code bulunamadı.")
+
         def update_repo(self):
             try:
                 res = subprocess.run(["git", "pull"], cwd=self.data['path'], capture_output=True, text=True)
-                QMessageBox.information(self, "Bilgi", "Başarılı" if res.returncode==0 else res.stderr)
-            except Exception as e: QMessageBox.critical(self, "Hata", str(e))
+                if res.returncode == 0: messagebox.showinfo("Bilgi", "Başarıyla güncellendi.")
+                else: messagebox.showerror("Hata", res.stderr)
+            except Exception as e: messagebox.showerror("Hata", str(e))
+
         def delete_repo(self):
-            if QMessageBox.question(self, "Onay", "Silinsin mi?", QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+            if messagebox.askyesno("Onay", "Bu repo tamamen silinsin mi?"):
                 if os.path.exists(self.data['path']): shutil.rmtree(self.data['path'], onerror=remove_readonly)
                 r_dir = Path(self.cfg.get("repos_dir", str(Path.home() / "EnpaiRepos")))
                 rec_file = r_dir / "repos.json"
                 if rec_file.exists():
                     with open(rec_file, "r", encoding="utf-8") as f: recs = json.load(f)
                     with open(rec_file, "w", encoding="utf-8") as f: json.dump([r for r in recs if r['path']!=self.data['path']], f, indent=2, ensure_ascii=False)
-                self.repoChanged.emit(); self.close()
+                self.on_repo_changed()
+                self.destroy()
 
-    class MultiWorker(QThread):
-        finished = pyqtSignal(bool, str); progress = pyqtSignal(str); percent = pyqtSignal(int)
-        def __init__(self, urls, token, base_dir):
-            super().__init__(); self.urls, self.token, self.base_dir = urls, token, Path(base_dir)
-        def run(self):
-            total = len(self.urls); success = 0
-            for i, url in enumerate(self.urls):
-                url = url.strip(); 
-                if not url: continue
-                self.progress.emit(f"({i+1}/{total}) {url}"); self.percent.emit(int((i/total)*100))
-                try:
-                    match = re.search(r"github\.com[:/]([^/]+)/([^/\.]+)", url)
-                    if not match: continue
-                    owner, repo_name = match.groups(); repo_name = repo_name.replace(".git", "")
-                    info = fetch_repo_info(owner, repo_name, self.token); cat = detect_category(info); target = self.base_dir / cat / repo_name
-                    if target.exists(): continue
-                    target.mkdir(parents=True, exist_ok=True)
-                    c_url = info.get("clone_url", url)
-                    if self.token: c_url = c_url.replace("https://", f"https://{self.token.strip()}@")
-                    if subprocess.run(["git", "clone", "--depth", "1", c_url, str(target)], capture_output=True, text=True).returncode == 0:
-                        success += 1; d = info.get('description') or "Açıklama yok."
-                        with open(target / "info.txt", "w", encoding="utf-8") as f: f.write(f"Repo: {info.get('full_name')}\n{d}\n")
-                        rec_file = self.base_dir / "repos.json"; recs = []
-                        if rec_file.exists():
-                            with open(rec_file, "r", encoding="utf-8") as f: recs = json.load(f)
-                        recs.append({"name": info.get("full_name"), "category": cat, "path": str(target), "description": d, "date": datetime.now().strftime("%Y-%m-%d %H:%M")})
-                        with open(rec_file, "w", encoding="utf-8") as f: json.dump(recs, f, indent=2, ensure_ascii=False)
-                except: pass
-            self.percent.emit(100); self.finished.emit(True, f"{success} repo indirildi.")
-
-    class EnpaiGUI(QMainWindow):
+    class EnpaiGUI(ctk.CTk):
         def __init__(self):
-            super().__init__(); self.setWindowTitle("EnpaiManage (Enpai Dev)"); self.resize(1100, 800); self.setStyleSheet(STYLE)
-            self.cfg = load_config(); self.records = []; self.init_ui(); self.load_repos()
-            self.timer = QTimer(); self.timer.timeout.connect(self.sync_with_fs); self.timer.start(5000)
+            super().__init__()
+            self.title("EnpaiManage (Enpai Dev)")
+            self.geometry("1100x800")
+            
+            self.cfg = load_config()
+            self.records = []
+            
+            self.init_ui()
+            self.load_repos()
+            self.after(5000, self.auto_sync)
 
         def init_ui(self):
-            central = QWidget(); self.setCentralWidget(central); layout = QHBoxLayout(central); layout.setContentsMargins(0,0,0,0)
-            sidebar = QWidget(); sidebar.setObjectName("Sidebar"); sidebar.setFixedWidth(220); side_lay = QVBoxLayout(sidebar)
-            logo = QLabel("ENPAI DEV"); logo.setStyleSheet("font-size: 24px; font-weight: bold; color: #38bdf8; margin: 25px;"); side_lay.addWidget(logo)
-            b1 = QPushButton("📂 Repolar"); b1.clicked.connect(lambda: self.stack.setCurrentIndex(0)); side_lay.addWidget(b1)
-            b2 = QPushButton("⚙️ Ayarlar"); b2.clicked.connect(lambda: self.stack.setCurrentIndex(1)); side_lay.addWidget(b2)
-            side_lay.addStretch()
-            b_gen = QPushButton("📝 Profil README"); b_gen.setObjectName("Action"); b_gen.clicked.connect(self.gen_readme); side_lay.addWidget(b_gen)
-            side_lay.addWidget(QLabel("By Enous")); layout.addWidget(sidebar)
-            self.stack = QStackedWidget(); layout.addWidget(self.stack)
-            # P1
-            p1 = QWidget(); p1_lay = QVBoxLayout(p1); p1_lay.setContentsMargins(40,40,40,40)
-            p1_lay.addWidget(QLabel("GitHub Linkleri")); self.url_in = QPlainTextEdit(); self.url_in.setFixedHeight(100); p1_lay.addWidget(self.url_in)
-            btn = QPushButton("İndir"); btn.clicked.connect(self.start_clone); p1_lay.addWidget(btn)
-            self.status = QLabel("Hazır."); p1_lay.addWidget(self.status)
-            self.prog = QProgressBar(); self.prog.setVisible(False); p1_lay.addWidget(self.prog)
-            p1_lay.addSpacing(20); p1_lay.addWidget(QLabel("Repo Koleksiyonu"))
-            search_lay = QHBoxLayout(); self.search_in = QLineEdit(); self.search_in.setPlaceholderText("İsme göre ara..."); self.search_in.textChanged.connect(self.filter_list); search_lay.addWidget(self.search_in)
-            self.cat_filter = QComboBox(); self.cat_filter.addItems(["Tümü", "AI-ML", "Security", "Web", "Tools", "Python", "Other"]); self.cat_filter.currentTextChanged.connect(self.filter_list); search_lay.addWidget(self.cat_filter)
-            p1_lay.addLayout(search_lay)
-            self.list = QListWidget(); self.list.itemClicked.connect(self.show_details); p1_lay.addWidget(self.list)
-            self.path_lbl = QLabel(""); self.path_lbl.setStyleSheet("color: #64748b; font-size: 11px;"); p1_lay.addWidget(self.path_lbl)
-            self.stack.addWidget(p1)
-            # P2
-            p2 = QWidget(); p2_lay = QVBoxLayout(p2); p2_lay.setContentsMargins(40,40,40,40)
-            p2_lay.addWidget(QLabel("GitHub Token")); self.t_ed = QLineEdit(); self.t_ed.setEchoMode(QLineEdit.EchoMode.Password); self.t_ed.setText(self.cfg.get("token","")); p2_lay.addWidget(self.t_ed)
-            p2_lay.addWidget(QLabel("Groq API Key")); self.g_ed = QLineEdit(); self.g_ed.setEchoMode(QLineEdit.EchoMode.Password); self.g_ed.setText(self.cfg.get("groq_key","")); p2_lay.addWidget(self.g_ed)
-            p2_lay.addWidget(QLabel("Klasör")); d_box = QHBoxLayout(); self.d_ed = QLineEdit(); self.d_ed.setText(self.cfg.get("repos_dir","")); d_box.addWidget(self.d_ed)
-            b_br = QPushButton("Seç"); b_br.setObjectName("Secondary"); b_br.clicked.connect(self.browse); d_box.addWidget(b_br); p2_lay.addLayout(d_box)
-            b_sv = QPushButton("Kaydet"); b_sv.clicked.connect(self.save_sets); p2_lay.addWidget(b_sv); p2_lay.addStretch(); self.stack.addWidget(p2)
+            # Configure grid layout
+            self.grid_rowconfigure(0, weight=1)
+            self.grid_columnconfigure(1, weight=1)
+            
+            # Sidebar
+            self.sidebar = ctk.CTkFrame(self, corner_radius=0, width=220)
+            self.sidebar.grid(row=0, column=0, sticky="nsew")
+            self.sidebar.grid_propagate(False)
+            
+            self.lbl_logo = ctk.CTkLabel(self.sidebar, text="ENPAI DEV", font=ctk.CTkFont(size=24, weight="bold"), text_color="#38bdf8")
+            self.lbl_logo.pack(pady=(30, 40))
+            
+            self.btn_menu_repos = ctk.CTkButton(self.sidebar, text="📂 Repolar", fg_color="transparent", anchor="w", command=lambda: self.show_page(self.page_repos))
+            self.btn_menu_repos.pack(fill="x", padx=10, pady=5)
+            
+            self.btn_menu_settings = ctk.CTkButton(self.sidebar, text="⚙️ Ayarlar", fg_color="transparent", anchor="w", command=lambda: self.show_page(self.page_settings))
+            self.btn_menu_settings.pack(fill="x", padx=10, pady=5)
+            
+            # Spacer
+            ctk.CTkFrame(self.sidebar, fg_color="transparent").pack(expand=True)
+            
+            self.btn_readme = ctk.CTkButton(self.sidebar, text="📝 Profil README", fg_color="#10b981", hover_color="#059669", command=self.gen_readme)
+            self.btn_readme.pack(fill="x", padx=10, pady=(10, 5))
+            
+            self.lbl_author = ctk.CTkLabel(self.sidebar, text="By Enous", font=ctk.CTkFont(size=10), text_color="#64748b")
+            self.lbl_author.pack(pady=(0, 20))
+            
+            # Pages
+            self.page_repos = ctk.CTkFrame(self, fg_color="transparent")
+            self.page_settings = ctk.CTkFrame(self, fg_color="transparent")
+            
+            self.setup_repos_page()
+            self.setup_settings_page()
+            
+            self.show_page(self.page_repos)
+
+        def show_page(self, page):
+            self.page_repos.grid_forget()
+            self.page_settings.grid_forget()
+            page.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+            
+            # Highlight sidebar buttons
+            if page == self.page_repos:
+                self.btn_menu_repos.configure(fg_color=["gray75", "gray25"])
+                self.btn_menu_settings.configure(fg_color="transparent")
+            else:
+                self.btn_menu_repos.configure(fg_color="transparent")
+                self.btn_menu_settings.configure(fg_color=["gray75", "gray25"])
+
+        def setup_repos_page(self):
+            # Cloning section
+            self.lbl_clone = ctk.CTkLabel(self.page_repos, text="GitHub Linkleri", font=ctk.CTkFont(size=14, weight="bold"))
+            self.lbl_clone.pack(anchor="w", pady=(0, 5))
+            
+            self.url_in = ctk.CTkTextbox(self.page_repos, height=100)
+            self.url_in.pack(fill="x", pady=(0, 10))
+            
+            self.btn_clone = ctk.CTkButton(self.page_repos, text="İndir", command=self.start_clone)
+            self.btn_clone.pack(anchor="e", pady=(0, 5))
+            
+            self.lbl_status = ctk.CTkLabel(self.page_repos, text="Hazır.", text_color="#94a3b8")
+            self.lbl_status.pack(anchor="w", pady=(0, 5))
+            
+            self.prog = ctk.CTkProgressBar(self.page_repos, progress_color="#38bdf8")
+            self.prog.set(0)
+            
+            # Collection section
+            self.lbl_coll = ctk.CTkLabel(self.page_repos, text="Repo Koleksiyonu", font=ctk.CTkFont(size=18, weight="bold"))
+            self.lbl_coll.pack(anchor="w", pady=(20, 10))
+            
+            search_frame = ctk.CTkFrame(self.page_repos, fg_color="transparent")
+            search_frame.pack(fill="x", pady=(0, 10))
+            
+            self.ent_search = ctk.CTkEntry(search_frame, placeholder_text="İsme göre ara...")
+            self.ent_search.pack(side="left", fill="x", expand=True, padx=(0, 10))
+            self.ent_search.bind("<KeyRelease>", lambda e: self.filter_list())
+            
+            self.cat_var = ctk.StringVar(value="Tümü")
+            self.cb_cat = ctk.CTkOptionMenu(search_frame, variable=self.cat_var, values=["Tümü", "AI-ML", "Security", "Web", "Tools", "Python", "Other"], command=lambda e: self.filter_list())
+            self.cb_cat.pack(side="left")
+            
+            self.scroll_list = ctk.CTkScrollableFrame(self.page_repos, fg_color="#1e293b", corner_radius=10)
+            self.scroll_list.pack(fill="both", expand=True, pady=(0, 5))
+            
+            self.lbl_path = ctk.CTkLabel(self.page_repos, text="", text_color="#64748b", font=ctk.CTkFont(size=11))
+            self.lbl_path.pack(anchor="w")
+
+        def setup_settings_page(self):
+            frame = ctk.CTkFrame(self.page_settings, corner_radius=10)
+            frame.pack(fill="both", expand=True, padx=40, pady=40)
+            
+            ctk.CTkLabel(frame, text="Ayarlar", font=ctk.CTkFont(size=20, weight="bold")).pack(anchor="w", padx=30, pady=(30, 20))
+            
+            ctk.CTkLabel(frame, text="GitHub Token", font=ctk.CTkFont(size=13)).pack(anchor="w", padx=30, pady=(0, 5))
+            self.t_ed = ctk.CTkEntry(frame, show="*")
+            self.t_ed.insert(0, self.cfg.get("token", ""))
+            self.t_ed.pack(fill="x", padx=30, pady=(0, 15))
+            
+            ctk.CTkLabel(frame, text="Groq API Key", font=ctk.CTkFont(size=13)).pack(anchor="w", padx=30, pady=(0, 5))
+            self.g_ed = ctk.CTkEntry(frame, show="*")
+            self.g_ed.insert(0, self.cfg.get("groq_key", ""))
+            self.g_ed.pack(fill="x", padx=30, pady=(0, 15))
+            
+            ctk.CTkLabel(frame, text="Klonlama Klasörü", font=ctk.CTkFont(size=13)).pack(anchor="w", padx=30, pady=(0, 5))
+            dir_frame = ctk.CTkFrame(frame, fg_color="transparent")
+            dir_frame.pack(fill="x", padx=30, pady=(0, 30))
+            
+            self.d_ed = ctk.CTkEntry(dir_frame)
+            self.d_ed.insert(0, self.cfg.get("repos_dir", ""))
+            self.d_ed.pack(side="left", fill="x", expand=True, padx=(0, 10))
+            
+            ctk.CTkButton(dir_frame, text="Seç", fg_color="#334155", hover_color="#475569", width=80, command=self.browse).pack(side="left")
+            
+            ctk.CTkButton(frame, text="Ayarları Kaydet", command=self.save_sets).pack(anchor="e", padx=30, pady=(0, 30))
 
         def gen_readme(self):
             if not self.records: return
@@ -314,25 +408,37 @@ try:
                 md += f"### 📂 {c}\n"
                 for r in rs: md += f"- **[{r['name']}](https://github.com/{r['name']})**: {r.get('description','No description')}\n"
                 md += "\n"
-            save_p, _ = QFileDialog.getSaveFileName(self, "README Kaydet", "", "Markdown Files (*.md)")
+            save_p = filedialog.asksaveasfilename(defaultextension=".md", filetypes=[("Markdown Files", "*.md")])
             if save_p:
                 with open(save_p, "w", encoding="utf-8") as f: f.write(md)
-                QMessageBox.information(self, "Başarılı", "Profil README dosyası oluşturuldu!")
+                messagebox.showinfo("Başarılı", "Profil README dosyası oluşturuldu!")
 
         def browse(self):
-            p = QFileDialog.getExistingDirectory(self, "Klasör Seç", self.d_ed.text())
-            if p: self.d_ed.setText(p)
+            p = filedialog.askdirectory(initialdir=self.d_ed.get())
+            if p:
+                self.d_ed.delete(0, "end")
+                self.d_ed.insert(0, p)
 
         def save_sets(self):
-            self.cfg["token"], self.cfg["repos_dir"], self.cfg["groq_key"] = self.t_ed.text().strip(), self.d_ed.text(), self.g_ed.text().strip(); save_config(self.cfg); self.stack.setCurrentIndex(0); self.load_repos()
+            self.cfg["token"] = self.t_ed.get().strip()
+            self.cfg["repos_dir"] = self.d_ed.get()
+            self.cfg["groq_key"] = self.g_ed.get().strip()
+            save_config(self.cfg)
+            self.show_page(self.page_repos)
+            self.load_repos()
 
         def load_repos(self):
             r_dir = Path(self.cfg.get("repos_dir", str(Path.home() / "EnpaiRepos")))
-            self.path_lbl.setText(f"Aktif Klasör: {r_dir}")
+            self.lbl_path.configure(text=f"Aktif Klasör: {r_dir}")
             if (r_dir / "repos.json").exists():
                 with open(r_dir / "repos.json", "r", encoding="utf-8") as f: self.records = json.load(f)
             else: self.records = []
-            self.sync_with_fs(refresh=False); self.filter_list()
+            self.sync_with_fs(refresh=False)
+            self.filter_list()
+
+        def auto_sync(self):
+            self.sync_with_fs()
+            self.after(5000, self.auto_sync)
 
         def sync_with_fs(self, refresh=True):
             if not self.records: return
@@ -344,29 +450,88 @@ try:
                 if refresh: self.filter_list()
 
         def filter_list(self):
-            self.list.clear(); search = self.search_in.text().lower(); cat = self.cat_filter.currentText()
+            # Clear current items
+            for widget in self.scroll_list.winfo_children():
+                widget.destroy()
+                
+            search = self.ent_search.get().lower()
+            cat = self.cat_var.get()
+            
             for r in reversed(self.records):
                 if (search in r['name'].lower()) and (cat == "Tümü" or r['category'] == cat):
-                    it = QListWidgetItem(f"📦 {r['name']}\n📁 {r['category']}  |  📅 {r['date']}"); it.setData(Qt.ItemDataRole.UserRole, r); self.list.addItem(it)
+                    self.create_repo_item(r)
 
-        def show_details(self, it):
-            d = DetailsDialog(it.data(Qt.ItemDataRole.UserRole), self.cfg, self); d.repoChanged.connect(self.load_repos); d.exec()
+        def create_repo_item(self, repo_data):
+            btn = ctk.CTkButton(
+                self.scroll_list, 
+                text=f"📦 {repo_data['name']}   |   📂 {repo_data['category']}   |   📅 {repo_data['date']}",
+                fg_color="#0f172a",
+                hover_color="#38bdf8",
+                text_color="#f8fafc",
+                anchor="w",
+                height=40,
+                command=lambda r=repo_data: self.show_details(r)
+            )
+            btn.pack(fill="x", pady=2, padx=5)
+
+        def show_details(self, repo_data):
+            DetailsDialog(self, repo_data, self.cfg, self.load_repos)
 
         def start_clone(self):
-            urls = [u for u in self.url_in.toPlainText().split('\n') if u.strip()]
+            urls = [u for u in self.url_in.get("0.0", "end").split('\n') if u.strip()]
             if not urls: return
-            self.prog.setVisible(True); self.worker = MultiWorker(urls, self.cfg.get("token"), self.cfg.get("repos_dir"))
-            self.worker.progress.connect(self.status.setText); self.worker.percent.connect(self.prog.setValue)
-            self.worker.finished.connect(self.on_done); self.worker.start()
-
-        def on_done(self, s, m): self.prog.setVisible(False); self.status.setText(m); self.load_repos(); self.url_in.clear()
-
-    GUI_MODE = True
-    GUI_ERROR = ""
-except Exception as e:
-    import traceback
-    GUI_MODE = False
-    GUI_ERROR = traceback.format_exc()
+            
+            self.prog.pack(fill="x", pady=(5, 0))
+            self.prog.set(0)
+            
+            q = queue.Queue()
+            def worker():
+                total = len(urls); success = 0
+                base_dir = Path(self.cfg.get("repos_dir", str(Path.home() / "EnpaiRepos")))
+                token = self.cfg.get("token")
+                
+                for i, url in enumerate(urls):
+                    url = url.strip()
+                    if not url: continue
+                    q.put(("prog", f"({i+1}/{total}) {url}", (i/total)))
+                    try:
+                        match = re.search(r"github\.com[:/]([^/]+)/([^/\.]+)", url)
+                        if not match: continue
+                        owner, repo_name = match.groups(); repo_name = repo_name.replace(".git", "")
+                        info = fetch_repo_info(owner, repo_name, token); cat = detect_category(info); target = base_dir / cat / repo_name
+                        if target.exists(): continue
+                        target.mkdir(parents=True, exist_ok=True)
+                        c_url = info.get("clone_url", url)
+                        if token: c_url = c_url.replace("https://", f"https://{token.strip()}@")
+                        if subprocess.run(["git", "clone", "--depth", "1", c_url, str(target)], capture_output=True, text=True).returncode == 0:
+                            success += 1; d = info.get('description') or "Açıklama yok."
+                            with open(target / "info.txt", "w", encoding="utf-8") as f: f.write(f"Repo: {info.get('full_name')}\n{d}\n")
+                            rec_file = base_dir / "repos.json"; recs = []
+                            if rec_file.exists():
+                                with open(rec_file, "r", encoding="utf-8") as f: recs = json.load(f)
+                            recs.append({"name": info.get("full_name"), "category": cat, "path": str(target), "description": d, "date": datetime.now().strftime("%Y-%m-%d %H:%M")})
+                            with open(rec_file, "w", encoding="utf-8") as f: json.dump(recs, f, indent=2, ensure_ascii=False)
+                    except: pass
+                q.put(("done", f"{success} repo indirildi.", 1.0))
+                
+            def check_queue():
+                try:
+                    while True:
+                        msg = q.get_nowait()
+                        if msg[0] == "prog":
+                            self.lbl_status.configure(text=msg[1])
+                            self.prog.set(msg[2])
+                        elif msg[0] == "done":
+                            self.lbl_status.configure(text=msg[1])
+                            self.prog.pack_forget()
+                            self.load_repos()
+                            self.url_in.delete("0.0", "end")
+                            return
+                except queue.Empty: pass
+                self.after(100, check_queue)
+                
+            threading.Thread(target=worker, daemon=True).start()
+            check_queue()
 
 def is_admin():
     try: return ctypes.windll.shell32.IsUserAnAdmin()
@@ -380,16 +545,16 @@ def main():
         sys.exit()
         
     if GUI_MODE:
-        app = QApplication(sys.argv); win = EnpaiGUI(); win.show(); sys.exit(app.exec())
+        app = EnpaiGUI()
+        app.mainloop()
     else:
         print("\n[!] HATA: Arayuz baslatilamadi.")
-        print("[!] PyQt6 kutuphanesi eksik veya hatalı kurulmus olabilir.")
+        print("[!] CustomTkinter kutuphanesi eksik veya hatalı kurulmus olabilir.")
         print("-" * 50)
         print("HATA DETAYI:")
         print(GUI_ERROR)
         print("-" * 50)
-        print("[!] Olası Neden: Python 3.14 gibi deneysel bir surum kullaniyorsaniz PyQt6 desteklenmiyor olabilir.")
-        print("[!] Cozum: Python 3.11 veya 3.12 surumunu kurmayi deneyin.\n")
+        print("[!] Cozum: 'kurulum.bat' dosyasini yonetici olarak calistirin.\n")
         input("Cikmak icin ENTER'a basin...")
 
 if __name__ == "__main__": main()

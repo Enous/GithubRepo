@@ -13,8 +13,8 @@ if %errorlevel% neq 0 (
     exit
 )
 
-echo [*] PyQt6 yukleniyor...
-pip install PyQt6
+echo [*] CustomTkinter yukleniyor...
+pip install customtkinter
 
 echo [*] Git kontrol ediliyor...
 git --version >nul 2>&1
